@@ -1,10 +1,25 @@
-# Box API
+# ShinedeBox API
 
-Backend API de ShinedeBox, expose sous:
+## Role
 
-- `https://api.shinederu.ch/box/`
+Backend PHP de ShinedeBox. Il gere les metadonnees SQL, le stockage physique
+hors webroot, les telechargements controles et les liens publics par token.
 
-L'API gere les fichiers via metadonnees SQL et stockage physique hors webroot. Les telechargements passent par `download.php`; les liens publics passent par des tokens en base.
+Le code projet stable est `box`.
+
+## Repo et deploiement
+
+- Repo source: `P:\DEV\GitHub\App-ShinedeBox-API`
+- Repo GitHub: `https://github.com/Shinederu/App-ShinedeBox-API.git`
+- Runtime API: `P:\PROD\API\box`
+- Endpoint public: `https://api.shinederu.ch/box/`
+- Frontend proprietaire: `P:\DEV\GitHub\App-ShinedeBox`
+- Runtime frontend: `P:\PROD\ShinedeBox`
+- Stockage persistant: `P:\PROD\ShinedeBoxStorage\files`
+
+`P:\PROD\API\box` doit contenir uniquement le runtime necessaire a l'API. Les
+fichiers `.env`, `logs/` et `_ratelimit/` sont des elements runtime preserves,
+pas des sources a copier depuis DEV.
 
 ## Endpoints
 
@@ -14,63 +29,132 @@ L'API gere les fichiers via metadonnees SQL et stockage physique hors webroot. L
 - `POST /box/upload.php`
 - `POST /box/rename.php`
 - `POST /box/delete.php`
-- `GET /box/share.php?id=<file_id>` : liste des liens d'un fichier, admin requis.
-- `POST /box/share.php` : creation ou revocation d'un lien public, admin requis.
-- `GET /box/share.php?token=<token>` : lecture publique des infos d'un partage.
-- `GET /box/download.php?id=<file_id>` : telechargement admin.
-- `GET /box/download.php?token=<token>` : telechargement public.
+- `GET /box/share.php?id=<file_id>`: liste des liens d'un fichier, permission
+  requise.
+- `POST /box/share.php`: creation ou revocation d'un lien public, permission
+  requise.
+- `GET /box/share.php?token=<token>`: lecture publique des infos d'un partage.
+- `GET /box/download.php?id=<file_id>`: telechargement avec permission.
+- `GET /box/download.php?token=<token>`: telechargement public via partage.
 
-## Authentification
+Les reponses JSON suivent le contrat transversal:
 
-- Session centralisee via cookie `sid` (domaine `.shinederu.ch`).
-- Validation session dans `auth_sessions`.
-- Acces metier reserve au droit central `box.files.manage` ou au super-admin global.
+```json
+{
+  "success": true,
+  "data": {}
+}
+```
 
-## Modele d'acces
+Pour compatibilite avec le frontend statique actuel, les champs utiles restent
+aussi exposes au premier niveau (`files`, `stats`, `share`, etc.).
 
-- ShinedeBox fonctionne actuellement comme une bibliotheque commune pour les utilisateurs autorises.
-- Tout utilisateur avec `box.files.manage` peut lister, uploader, telecharger, renommer, supprimer et partager les fichiers actifs.
-- Il n'y a pas encore de cloisonnement par proprietaire ou dossier prive.
-- `box_files.owner_user_id` conserve l'utilisateur qui a depose le fichier, mais cette colonne sert a l'audit et non a filtrer les droits.
-- Les liens publics par token donnent uniquement acces au fichier cible, sans session et sans acces a la bibliotheque.
+Les erreurs suivent:
 
-## Donnees
+```json
+{
+  "success": false,
+  "error": "Message lisible"
+}
+```
+
+## Authentification et permissions
+
+- Session commune via cookie `sid` et tables `auth_sessions` / `users`.
+- Un utilisateur banni (`users.is_banned`) est refuse; si la colonne existe, sa
+  session Box est supprimee lors du controle.
+- Acces metier via `Module-ShinedeCore-PHP/services/ProjectAccessService.php`.
+- Permission stable requise: `box.files.manage`.
+- `core.super_admin` donne le bypass global via le service partage.
+
+Modele d'acces actuel:
+
+- ShinedeBox fonctionne comme une bibliotheque commune pour les utilisateurs
+  autorises.
+- Tout utilisateur avec `box.files.manage` peut lister, uploader, telecharger,
+  renommer, supprimer et partager les fichiers actifs.
+- `box_files.owner_user_id` conserve l'utilisateur deposant pour audit; il ne
+  filtre pas encore les droits.
+- Les liens publics par token donnent acces uniquement au fichier cible, sans
+  session ni acces a la bibliotheque.
+
+## Base de donnees
+
+Instance: MySQL `8.0`, schema partage `ShinedeCore`.
 
 Migration principale:
 
 - `sql/001_box_files.sql`
 
-Tables:
+Tables proprietaires:
 
-- `box_files` : metadonnees fichier, proprietaire d'audit, nom public, nom stocke, taille, MIME, checksum, soft delete.
-- `box_shares` : tokens publics, createur d'audit, expiration optionnelle, limite optionnelle de telechargements.
-- `box_download_events` : journal minimal des telechargements avec hashes IP/user-agent.
+- `box_files`: metadonnees fichier, proprietaire d'audit, nom public, nom
+  stocke, taille, MIME, checksum, soft delete.
+- `box_shares`: tokens publics, createur d'audit, expiration optionnelle, limite
+  optionnelle de telechargements.
+- `box_download_events`: journal minimal des telechargements avec hashes
+  IP/user-agent.
 
-Les suppressions UI sont des soft deletes (`deleted_at`) et ne suppriment pas immediatement le fichier physique.
+Les suppressions UI sont des soft deletes (`deleted_at`) et ne suppriment pas
+immediatement le fichier physique.
 
-## Liens publics
+## Dossiers runtime et fichiers partages
 
-Les liens publics generes par l'API utilisent le format lisible:
+- API runtime: `P:\PROD\API\box`
+- Stockage fichiers: `P:\PROD\ShinedeBoxStorage\files`
+- Logs API: `P:\PROD\API\box\logs\box.log`
+- Rate limit local: `P:\PROD\API\box\_ratelimit`
+
+Le dossier de stockage appartient a ShinedeBox. Les autres projets doivent y
+acceder par API HTTP, pas par ecriture directe.
+
+## Temps reel et evenements
+
+Aucun flux Mercure n'est publie ou consomme actuellement. Les clients peuvent
+toujours reconstruire l'etat via:
+
+- `GET https://api.shinederu.ch/box/list.php`
+- `GET https://api.shinederu.ch/box/share.php?id=<file_id>`
+
+Si ShinedeBox ajoute du temps reel plus tard, utiliser Mercure pour les
+evenements et garder l'API HTTP comme source de resynchronisation.
+
+Topics recommandes:
 
 ```text
-https://box.shinederu.ch/s/<token>/<nom-du-fichier>
+https://api.shinederu.ch/box/topics/files
+https://api.shinederu.ch/box/topics/files/{public_id}
 ```
 
-Exemple:
+Types recommandes:
 
 ```text
-https://box.shinederu.ch/s/012345.../dossier-partage.zip
+box.file.created
+box.file.renamed
+box.file.deleted
+box.share.created
+box.share.revoked
+box.file.downloaded
 ```
 
-Le token reste l'identifiant d'acces. Le nom du fichier est indicatif et sert a rendre le lien lisible. Les anciens liens `https://box.shinederu.ch/?share=<token>` restent compatibles cote frontend.
+## Dependances inter-projets
+
+- `Module-Auth-API`: sessions et utilisateurs.
+- `Module-ShinedeCore-PHP`: permissions centralisees.
+- `App-ShinedeBox`: frontend statique consommateur.
+
+ShinedeBox ne doit pas modifier directement les tables proprietaires d'un autre
+projet. Toute integration future passe par API HTTP documentee.
 
 ## Configuration
 
-Par defaut, l'API lit les variables depuis:
+Ordre de chargement reel:
 
-1. `.env` en source, deploye sous `API/box/.env` (optionnel, prioritaire)
-2. `Module-Auth-API/.env` en source, deploye sous `API/auth/.env` (fallback credentials partages)
-3. `.env.example` (template)
+1. `.env` local au runtime API (`P:\PROD\API\box\.env` en production).
+2. `.env` de l'API Auth comme fallback pour les credentials DB partages.
+
+`.env.example` est seulement un modele sans secret; il n'est pas charge par le
+runtime.
 
 Variables principales:
 
@@ -78,37 +162,73 @@ Variables principales:
 - `BOX_API_BASE`
 - `AUTH_PORTAL_URL`
 - `AUTH_API_BASE`
-- `DB_*` (ou `MQ_DB_*`)
+- `DB_TYPE`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- `BOX_DB_TYPE`, `BOX_DB_HOST`, `BOX_DB_PORT`, `BOX_DB_NAME`, `BOX_DB_USER`,
+  `BOX_DB_PASS` pour surcharger la DB de cette API.
 - `UPLOAD_DIR`
 - `MAX_FILE_MB`
 - `ALLOWED_EXT`
 - `BLOCKED_EXT`
 - `ALLOWED_MIME`
 
-`UPLOAD_DIR` doit pointer hors dossier public. En production, la valeur attendue est:
+Compatibilite historique: les variables `MQ_DB_*` peuvent encore etre lues en
+dernier fallback, mais ne doivent pas etre utilisees pour une nouvelle config
+ShinedeBox.
 
-```text
-/var/www/ShinedeBoxStorage/files
-```
-
-En production Docker, `DB_HOST` doit pointer vers le service interne:
+En production Docker:
 
 ```text
 DB_HOST=MySQL
+UPLOAD_DIR=/var/www/ShinedeBoxStorage/files
 ```
 
 Depuis le poste Codex Windows, les tests CLI peuvent utiliser `192.168.10.10`.
 
-## Logs
+## Logs et observabilite
 
-Les erreurs applicatives Box sont ecrites dans:
+Les erreurs applicatives sont ecrites via `error_log` et dans:
 
-- `logs/box.log` en source ou `API/box/logs/box.log` en prod
+```text
+P:\PROD\API\box\logs\box.log
+```
 
-Ce dossier est runtime et ne doit pas etre versionne.
+Ne jamais logger de secret, mot de passe, token de session ou JWT complet.
 
-## Verification locale
+## Verifications
 
 ```powershell
-Get-ChildItem P:\DEV\GitHub\App-ShinedeBox-API -Recurse -Filter *.php | % { php -l $_.FullName }
+cd P:\DEV\GitHub\App-ShinedeBox-API
+Get-ChildItem . -Recurse -Filter *.php | % { php -l $_.FullName }
 ```
+
+## Deploiement
+
+Copier uniquement le runtime utile vers `P:\PROD\API\box`:
+
+```powershell
+Copy-Item -LiteralPath *.php -Destination P:\PROD\API\box -Force
+Copy-Item -LiteralPath services,sql -Destination P:\PROD\API\box -Recurse -Force
+Copy-Item -LiteralPath .env.example -Destination P:\PROD\API\box -Force
+```
+
+Preserver en production:
+
+- `.env`
+- `logs/`
+- `_ratelimit/`
+- stockage `P:\PROD\ShinedeBoxStorage`
+
+Ne pas deployer `.git`, `README.md`, `AGENTS.md`, caches, tests, brouillons,
+secrets, logs locaux ou fichiers uploades.
+
+## Notes de reprise
+
+- L'API est volontairement simple, sans Composer obligatoire.
+- `ProjectAccessService.php` est resolu depuis `P:\PROD\API\core` en production
+  et depuis `P:\DEV\GitHub\Module-ShinedeCore-PHP` en developpement local.
+- Les liens publics utilisent le format lisible
+  `https://box.shinederu.ch/s/<token>/<nom-du-fichier>`.
+- L'ancien format `https://box.shinederu.ch/?share=<token>` reste gere cote
+  frontend.
+- Aucun changement destructif de donnees ne doit etre fait sans demande
+  explicite.

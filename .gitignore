@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+logs/
+_ratelimit/
+vendor/
+cache/
+tmp/
+files/
+uploads/
+*.log

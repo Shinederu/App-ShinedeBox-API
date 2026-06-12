@@ -1,8 +1,23 @@
 <?php
 declare(strict_types=1);
 
-// Shared config + helpers for API endpoints
-require_once __DIR__ . '/../core/services/ProjectAccessService.php';
+// Shared config + helpers for API endpoints.
+$coreServicePath = null;
+foreach ([
+    __DIR__ . '/../core/services/ProjectAccessService.php',
+    __DIR__ . '/../Module-ShinedeCore-PHP/services/ProjectAccessService.php',
+] as $candidateCoreServicePath) {
+    if (is_file($candidateCoreServicePath)) {
+        $coreServicePath = $candidateCoreServicePath;
+        break;
+    }
+}
+
+if ($coreServicePath === null) {
+    throw new RuntimeException('ProjectAccessService.php introuvable.');
+}
+
+require_once $coreServicePath;
 
 function load_dotenv(string $path): void
 {
@@ -55,6 +70,18 @@ function env(string $key, ?string $default = null): string
     return (string)$v;
 }
 
+function env_any(array $keys, ?string $default = null): string
+{
+    foreach ($keys as $key) {
+        $value = env((string)$key, '');
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return $default ?? '';
+}
+
 function to_bool($value): bool
 {
     if ($value === null) {
@@ -93,12 +120,12 @@ $ALLOWED_EXT = array_filter(array_map('trim', explode(',', env('ALLOWED_EXT', '*
 $BLOCKED_EXT = array_filter(array_map('trim', explode(',', env('BLOCKED_EXT', '.php,.phtml,.phar,.cgi,.pl,.py,.sh,.bash,.exe,.bat,.cmd,.com,.msi,.dll,.so'))));
 $ALLOWED_MIME = array_filter(array_map('trim', explode(',', env('ALLOWED_MIME', '*'))));
 
-$DB_TYPE = env('MQ_DB_TYPE', env('DB_TYPE', 'mysql'));
-$DB_HOST = env('MQ_DB_HOST', env('DB_HOST', '127.0.0.1'));
-$DB_NAME = env('MQ_DB_NAME', env('DB_NAME', 'ShinedeCore'));
-$DB_USER = env('MQ_DB_USER', env('DB_USER', 'root'));
-$DB_PASS = env('MQ_DB_PASS', env('DB_PASS', ''));
-$DB_PORT = env('MQ_DB_PORT', env('DB_PORT', '3306'));
+$DB_TYPE = env_any(['BOX_DB_TYPE', 'DB_TYPE', 'MQ_DB_TYPE'], 'mysql');
+$DB_HOST = env_any(['BOX_DB_HOST', 'DB_HOST', 'MQ_DB_HOST'], '127.0.0.1');
+$DB_NAME = env_any(['BOX_DB_NAME', 'DB_NAME', 'MQ_DB_NAME'], 'ShinedeCore');
+$DB_USER = env_any(['BOX_DB_USER', 'DB_USER', 'MQ_DB_USER'], 'root');
+$DB_PASS = env_any(['BOX_DB_PASS', 'DB_PASS', 'MQ_DB_PASS'], '');
+$DB_PORT = env_any(['BOX_DB_PORT', 'DB_PORT', 'MQ_DB_PORT'], '3306');
 
 if (!str_starts_with($UPLOAD_DIR, DIRECTORY_SEPARATOR)) {
     $UPLOAD_DIR = $projectRoot . DIRECTORY_SEPARATOR . $UPLOAD_DIR;
@@ -119,7 +146,14 @@ function json_response(int $status, array $data): void
 
 function json_success(array $data = [], int $status = 200): void
 {
-    json_response($status, ['success' => true] + $data);
+    $payload = ['success' => true, 'data' => $data === [] ? (object)[] : $data];
+    foreach ($data as $key => $value) {
+        if ($key !== 'success' && $key !== 'data') {
+            $payload[$key] = $value;
+        }
+    }
+
+    json_response($status, $payload);
 }
 
 function json_error(string $message, int $status = 400, array $extra = []): void
@@ -206,24 +240,30 @@ function get_session_id(): ?string
     return null;
 }
 
-function users_has_is_admin_column(PDO $pdo): bool
+function users_has_column(PDO $pdo, string $column): bool
 {
-    static $hasColumn = null;
-    if ($hasColumn !== null) {
-        return $hasColumn;
+    static $columns = [];
+    if (array_key_exists($column, $columns)) {
+        return $columns[$column];
     }
 
-    $stmt = $pdo->query(
+    $stmt = $pdo->prepare(
         "SELECT 1
          FROM INFORMATION_SCHEMA.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE()
            AND TABLE_NAME = 'users'
-           AND COLUMN_NAME = 'is_admin'
+           AND COLUMN_NAME = :column
          LIMIT 1"
     );
-    $hasColumn = (bool)$stmt->fetch();
+    $stmt->execute(['column' => $column]);
+    $columns[$column] = (bool)$stmt->fetch();
 
-    return $hasColumn;
+    return $columns[$column];
+}
+
+function users_has_is_admin_column(PDO $pdo): bool
+{
+    return users_has_column($pdo, 'is_admin');
 }
 
 function get_current_auth_state(): array
@@ -245,28 +285,27 @@ function get_current_auth_state(): array
 
     $pdo = db();
 
-    $hasIsAdmin = users_has_is_admin_column($pdo);
-    if ($hasIsAdmin) {
-        $sql = 'SELECT u.id, u.username, u.email, u.role, u.is_admin
-                FROM auth_sessions s
-                INNER JOIN users u ON u.id = s.user_id
-                WHERE s.id = :sid
-                  AND s.expires_at > NOW()
-                LIMIT 1';
-    } else {
-        $sql = 'SELECT u.id, u.username, u.email, u.role, NULL AS is_admin
-                FROM auth_sessions s
-                INNER JOIN users u ON u.id = s.user_id
-                WHERE s.id = :sid
-                  AND s.expires_at > NOW()
-                LIMIT 1';
-    }
+    $isAdminSelect = users_has_is_admin_column($pdo) ? 'u.is_admin' : 'NULL AS is_admin';
+    $isBannedSelect = users_has_column($pdo, 'is_banned') ? 'u.is_banned' : '0 AS is_banned';
+    $sql = "SELECT u.id, u.username, u.email, u.role, {$isAdminSelect}, {$isBannedSelect}
+            FROM auth_sessions s
+            INNER JOIN users u ON u.id = s.user_id
+            WHERE s.id = :sid
+              AND s.expires_at > NOW()
+            LIMIT 1";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute(['sid' => $sid]);
     $row = $stmt->fetch();
 
     if (!$row || empty($row['id'])) {
+        return $empty;
+    }
+
+    if (to_bool($row['is_banned'] ?? false)) {
+        $delete = $pdo->prepare('DELETE FROM auth_sessions WHERE id = :sid');
+        $delete->execute(['sid' => $sid]);
+
         return $empty;
     }
 
