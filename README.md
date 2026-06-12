@@ -207,8 +207,7 @@ Copier uniquement le runtime utile vers `P:\PROD\API\box`:
 
 ```powershell
 Copy-Item -LiteralPath *.php -Destination P:\PROD\API\box -Force
-Copy-Item -LiteralPath services,sql -Destination P:\PROD\API\box -Recurse -Force
-Copy-Item -LiteralPath .env.example -Destination P:\PROD\API\box -Force
+Copy-Item -LiteralPath services -Destination P:\PROD\API\box -Recurse -Force
 ```
 
 Preserver en production:
@@ -219,7 +218,9 @@ Preserver en production:
 - stockage `P:\PROD\ShinedeBoxStorage`
 
 Ne pas deployer `.git`, `README.md`, `AGENTS.md`, caches, tests, brouillons,
-secrets, logs locaux ou fichiers uploades.
+secrets, logs locaux, fichiers uploades, `.env.example` ou `sql/` en routine.
+Le dossier `sql/` reste source; le copier uniquement sur demande explicite de
+migration ou de reprise.
 
 ## Notes de reprise
 

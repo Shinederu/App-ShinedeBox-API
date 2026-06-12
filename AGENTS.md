@@ -33,8 +33,6 @@ Copier uniquement le runtime necessaire vers `P:\PROD\API\box`:
 
 - `*.php`
 - `services\`
-- `sql\`
-- `.env.example`
 
 Preserver en production:
 
@@ -42,6 +40,9 @@ Preserver en production:
 - `logs\`
 - `_ratelimit\`
 - tout stockage persistant hors repo
+
+Le dossier `sql\` et `.env.example` restent dans le repo source; ne les deployer
+que sur demande explicite de migration ou de reprise.
 
 ## Contrats ecosysteme
 
