@@ -68,9 +68,9 @@ Le token reste l'identifiant d'acces. Le nom du fichier est indicatif et sert a 
 
 Par defaut, l'API lit les variables depuis:
 
-1. `API/box/.env` (optionnel, prioritaire)
-2. `API/auth/.env` (fallback credentials partages)
-3. `API/box/.env.example` (template)
+1. `.env` en source, deploye sous `API/box/.env` (optionnel, prioritaire)
+2. `Module-Auth-API/.env` en source, deploye sous `API/auth/.env` (fallback credentials partages)
+3. `.env.example` (template)
 
 Variables principales:
 
@@ -103,12 +103,12 @@ Depuis le poste Codex Windows, les tests CLI peuvent utiliser `192.168.10.10`.
 
 Les erreurs applicatives Box sont ecrites dans:
 
-- `API/box/logs/box.log`
+- `logs/box.log` en source ou `API/box/logs/box.log` en prod
 
 Ce dossier est runtime et ne doit pas etre versionne.
 
 ## Verification locale
 
 ```powershell
-Get-ChildItem API/box -Recurse -Filter *.php | % { php -l $_.FullName }
+Get-ChildItem P:\DEV\GitHub\App-ShinedeBox-API -Recurse -Filter *.php | % { php -l $_.FullName }
 ```
